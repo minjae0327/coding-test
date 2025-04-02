@@ -37,10 +37,12 @@ class AlexNet(nn.Module): # input : 227*227*3
             nn.Flatten(),
             nn.Linear(128 * 6 * 6, 2048),
             nn.ReLU(),
+            nn.Dropout(0.5)
         )
         self.fc2 = nn.Sequential(
             nn.Linear(2048, 2048),
             nn.ReLU(),
+            nn.Dropout(0.5)
         )
         self.fc3 = nn.Sequential(
             nn.Linear(4096, 1000)
