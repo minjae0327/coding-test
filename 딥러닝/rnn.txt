@@ -1,49 +1,39 @@
-**📄 RNN ~ Transformer: 가중치 구조 및 공유 요약 문서**
+📄 RNN ~ Transformer: 가중치 구조 및 공유 요약 문서
 
----
+🔁 RNN(Recurrent Neural Network)
 
-### 🔁 RNN(Recurrent Neural Network)
+✅ 핵심 구조
+- 입력: 
+- 은닉 상태: 
+- 출력: 
 
-#### ✅ 핵심 구조
-- 입력: \( x_t \)
-- 은닉 상태: \( h_t = \tanh(W_{xh}x_t + W_{hh}h_{t-1} + b_h) \)
-- 출력: \( y_t = W_{hy}h_t + b_y \)
+✅ 학습되는 가중치
+- W_xh: 입력 → 은닉 (input to hidden)
+- W_hh: 이전 은닉 → 현재 은닉 (hidden to hidden)
+- b_h: 은닉 바이어스
+- W_hy, b_y: 은닉 → 출력층 (출력층 가중치도 학습됨)
 
-#### ✅ 학습되는 가중치
-- \( W_{xh} \): 입력 → 은닉 (input to hidden)
-- \( W_{hh} \): 이전 은닉 → 현재 은닉 (hidden to hidden)
-- \( b_h \): 은닉 바이어스
-- \( W_{hy} \), \( b_y \): 은닉 → 출력층 (출력층 가중치도 학습됨)
+🔄 가중치 공유
+- 모든 시점 t에서 동일한 W_xh, W_hh, b_h 사용
+- 시간 축을 따라 공유 (time-unrolled weight sharing)
 
-#### 🔄 가중치 공유
-- RNN은 하나의 RNN 셀 구조를 모든 시점에 복사해서 사용하는 방식
-- 따라서 모든 시점 \( t \)에서 동일한 \( W_{xh}, W_{hh} \)를 사용
-- **시간 축을 따라 공유(time-unrolled weight sharing)**
+🔀 Transformer
 
----
+✅ 주요 Weight Sharing 방식
 
-### 🔀 Transformer
+📌 입력 임베딩 ↔ 출력층 가중치 (Weight Tying)
+- 입력 임베딩 행렬 W_e를 출력층의 weight로 재사용
+- 이점: 파라미터 수 감소 + 입력/출력 정렬 강화
 
-#### ✅ 주요 Weight Sharing 방식
+📌 레이어 가중치 공유 (Layer Sharing)
+- 예: ALBERT 모델
+- 동일한 encoder layer 파라미터를 모든 레이어에 공유
+- 이점: 모델 크기 감소 + 일반화 향상
 
-1. **📌 입력 임베딩 ↔ 출력층 가중치 (Weight Tying)**
-   - 입력 임베딩 행렬 \( E \)를 출력층의 weight로 재사용
-   - \( P(y_t) = \text{softmax}(E^\top h_t) \)
-   - 이점: 파라미터 수 감소 + 입력/출력 정렬 강화
+✅ 전체 요약 표
 
-2. **📌 레이어 가중치 공유 (Layer Sharing)**
-   - 예: ALBERT 모델
-   - 동일한 encoder layer 파라미터를 모든 레이어에 공유
-   - 이점: 모델 크기 감소 + 일반화 향상
-
----
-
-### ✅ 전체 요약 표
-
-| 모델       | 공유 방식                        | 설명 |
-|------------|-----------------------------------|------|
-| RNN        | 시간축 가중치 공유               | 모든 시점에서 동일한 RNN 셀 사용 |
-| Transformer| Embedding-Output weight tying    | 입력 임베딩 = 출력 weight |
-| Transformer| Encoder layer weight sharing     | 일부 모델에서 레이어 전체 공유 |
-
-
+모델        | 공유 방식                          | 설명
+------------|-----------------------------------|-----------------------------
+RNN         | 시간축 가중치 공유                 | 모든 시점에서 동일한 RNN 셀 사용
+Transformer | Embedding-Output weight tying     | 입력 임베딩 = 출력 weight
+Transformer | Encoder layer weight sharing      | 일부 모델에서 레이어 전체 공유
