@@ -1,16 +1,26 @@
-import sys
+n, m = 4, 3
+table = [
+    [1, 2, 3, 4],
+    [2, 3, 4, 5],
+    [3, 4, 5, 6],
+    [4, 5, 6, 7]
+]
+coords = [
+    [2, 2, 3, 4],
+    [3, 4, 3, 4],
+    [1, 1, 4, 4]
+]
 
-input = sys.stdin.readline
+dp = [[0 for _ in range(n)] for _ in range(n)]
 
-a, b, c = map(int, input().split())
-
-def moduler_exponentitaion(a, b, c):
-    if b == 0:
-        return 1
-    elif b % 2 == 0:
-        temp = moduler_exponentitaion(a, b // 2, c)
-        return (temp * temp) % c
-    else:
-        return (a * moduler_exponentitaion(a, b-1, c)) % c
-    
-print(moduler_exponentitaion(a, b, c))
+for i in range(n):
+    for j in range(n):
+        if j == 0:
+            if i > 0:
+                dp[i][j] = table[i][j] + dp[i-1][j-1]
+            else:
+                dp[i][j] = table[i][j] + dp[i-1][j]
+        else:
+            dp[i][j] = table[i][j] + dp[i][j-1] + dp[i-1][j] + dp[i-1][j-1]
+            
+print(dp)
