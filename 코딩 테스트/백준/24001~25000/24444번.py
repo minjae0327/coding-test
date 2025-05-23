@@ -15,22 +15,23 @@ for i in range(1, n+1):
 
 visited = [0] * (n+1)
 order = 1
-
-def dfs(start):
+    
+def bfs(s):
     global order
-    stack = [start]
-
-    while stack:
-        node = stack.pop()
-        if visited[node] != 0:
-            continue
-        visited[node] = order
-        order += 1
-        for neighbor in reversed(dist[node]):
+    visited[s] = order
+    have_to_visit = deque()
+    have_to_visit.append(s)
+    order += 1
+    
+    while have_to_visit:
+        node = have_to_visit.popleft()
+        for neighbor in dist[node]:
             if visited[neighbor] == 0:
-                stack.append(neighbor)
-
-dfs(start)
+                visited[neighbor] = order
+                order += 1
+                have_to_visit.append(neighbor)
+            
+bfs(start)
 
 for i in range(1, n+1):
     print(visited[i])
