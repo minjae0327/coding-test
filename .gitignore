@@ -1,3 +1,5 @@
 /딥러닝/datasets
 /딥러닝/models
 *.mp4
+/딥러닝/output
+/딥러닝/chroma_db
