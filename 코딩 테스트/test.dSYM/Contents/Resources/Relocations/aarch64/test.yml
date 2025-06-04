@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     "/Users/aepeul/Documents/GitHub/coding-test/코딩 테스트/test"
+relocations:     []
+...
