@@ -1,4 +1,0 @@
-RNN = https://chatgpt.com/canvas/shared/67ee4f94a8f48191a36990bd59498530
-LSTM = https://chatgpt.com/canvas/shared/67f3b335ccf881918fee54b6aa9945b7
-seq2seq = 
-Attention = 

@@ -1,0 +1,7 @@
+langchain
+langchain_community
+langchain_openai
+docling
+pdfplumber
+sentence-transformers
+langchain_ollama
