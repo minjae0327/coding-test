@@ -1,84 +1,102 @@
-from flask import Flask, request, jsonify, session
-from run_rag import RAGApp
+# app.py
+from flask import Flask, request, jsonify
 import os
-from datetime import timedelta
+import uuid # 세션 ID 생성을 위해 uuid 모듈 import
+import os
+from tasks import build_rag_task # Celery task import
 
 app = Flask(__name__)
 
-# --- 세션 관리를 위한 설정 추가 ---
-# 세션을 암호화하기 위한 시크릿 키입니다. 실제 서비스에서는 아무도 모르는 복잡한 값으로 바꿔야 합니다.
-app.secret_key = 'your-very-secret-key-for-session' 
-
-# 세션의 유효 기간을 설정합니다. 예를 들어 1시간 동안 유지됩니다.
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
-
-
+# 업로드된 파일을 저장할 디렉토리 설정
 UPLOAD_FOLDER = 'uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+rag_cache = {} # 세션 ID별 RAGApp 인스턴스를 저장할 딕셔너리
+
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    """ 📄 웹 서버로부터 PDF 파일을 받아 RAG 파이프라인을 초기화하는 API """
+    global rag_app
     if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
+        return jsonify({"status": "error", "message": "파일이 존재하지 않습니다."}), 400
     
     file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
     
-    if file:
+    if file.filename == '':
+        return jsonify({"status": "error", "message": "파일이 선택되지 않았습니다."}), 400
+
+    if file and file.filename.endswith('.pdf'):
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(filepath)
-        
-        # --- 세션에 파일 경로 저장 ---
-        # session은 사용자별로 유지되는 고유한 저장 공간입니다.
-        session['filepath'] = filepath
-        session.permanent = True # 설정한 유효 기간을 사용하도록 합니다.
 
-        # RAG 인스턴스화 (이 부분은 기존 로직에 맞게 조정 필요)
-        # rag_app_instance = RAGApp(filepath)
-        # rag_app_instance()
-        
-        return jsonify({'message': 'File uploaded and RAG initialized successfully', 'filepath': filepath}), 200
+        try:
+            # 고유한 세션 ID 생성
+            session_id = str(uuid.uuid4())
+            # Celery 태스크로 RAG 빌드 작업 비동기 실행
+            task = build_rag_task.delay(filepath, session_id)
+
+            return jsonify({
+                "status": "success",
+                "message": f"'{file.filename}' 파일 업로드 및 RAG 빌드 작업이 시작되었습니다.",
+                "session_id": session_id,
+                "task_id": task.id # 클라이언트가 작업 상태를 추적할 수 있도록 task_id 반환
+            }), 200
+        except Exception as e:
+            # RAG 파이프라인 설정 중 에러가 발생하면 클라이언트에게 알립니다.
+            print(f"RAG 파이프라인 설정 중 오류 발생: {e}")
+            return jsonify({"status": "error", "message": f"파일 처리 중 오류 발생: {e}"}), 500
+    else:
+        return jsonify({"status": "error", "message": "PDF 파일만 업로드 가능합니다."}), 400
+
 
 @app.route('/ask', methods=['POST'])
 def ask_question():
+    """ ❓ 업로드된 PDF에 대해 질문하고 답변을 받는 API """
+
+    if not request.is_json:
+        return jsonify({"status": "error", "message": "요청 형식이 JSON이 아닙니다."}), 400
+        
     data = request.get_json()
-    question = data.get('question')
-
-    # --- 세션에서 파일 경로 가져오기 ---
-    filepath = session.get('filepath')
-    if not filepath or not os.path.exists(filepath):
-        return jsonify({'error': 'RAG not initialized or file not found. Please upload a PDF first.'}), 400
-
-    # 요청이 올 때마다 RAG 인스턴스를 생성하거나, 혹은 미리 생성된 것을 활용
-    # 이 예시에서는 RAGApp의 동작 방식을 정확히 모르므로, 파일 경로만 전달하는 것으로 가정
-    rag_app_instance = RAGApp(filepath)
-    result = rag_app_instance.ask_question(question)
-
-    return jsonify({'answer': result})
-
-# --- 접속 해제 시 파일을 삭제하는 API 엔드포인트 추가 ---
-@app.route('/disconnect', methods=['POST'])
-def disconnect():
-    """사용자가 페이지를 떠날 때 호출될 API"""
-    filepath = session.get('filepath')
+    question = data.get('question', None)
     
-    if filepath and os.path.exists(filepath):
-        try:
-            os.remove(filepath)
-            print(f"파일 삭제 완료: {filepath}")
-            # 세션에서 파일 경로 정보도 제거
-            session.pop('filepath', None)
-            return jsonify({'message': 'File and session cleaned up successfully.'}), 200
-        except OSError as e:
-            print(f"파일 삭제 오류: {e}")
-            return jsonify({'error': 'Failed to delete file.'}), 500
-            
-    return jsonify({'message': 'No file to clean up.'}), 200
+    if not question:
+        return jsonify({"status": "error", "message": "질문(question)이 없습니다."}), 400
+    
+    session_id = data.get('session_id', None)
+    if not session_id:
+        return jsonify({"status": "error", "message": "세션 ID가 필요합니다."}), 400
+
+    try:
+        # 캐시에서 RAGApp 인스턴스 로드 또는 빌드 상태 확인
+        if session_id not in rag_cache:
+            # Celery 작업 상태 확인 (선택 사항, 클라이언트에서 task_id로 직접 확인 가능)
+            # task = build_rag_task.AsyncResult(task_id_associated_with_session)
+            # if not task.ready():
+            #     return jsonify({"status": "pending", "message": "RAG 빌드 작업이 아직 완료되지 않았습니다."}), 202
+            # else:
+            #     # 작업 완료 후 결과 (pkl 파일 경로)를 사용하여 RAGApp 로드
+            #     dump_path = task.result
+            #     import pickle # 또는 dill
+            #     with open(dump_path, "rb") as f:
+            #         rag_cache[session_id] = pickle.load(f) # 또는 dill.load(f)
+            return jsonify({"status": "error", "message": "유효하지 않은 세션 ID이거나 RAG 빌드 작업이 완료되지 않았습니다. 먼저 PDF를 업로드해주세요."}), 400
+
+        print(f"수신된 질문: {question}")
+        
+        # RAG 파이프라인을 통해 답변 생성
+        answer = rag_app.ask_question(question)
+        
+        print(f"생성된 답변: {answer}")
+        return jsonify({"status": "success", "answer": answer}), 200
+
+    except Exception as e:
+        print(f"답변 생성 중 오류 발생: {e}")
+        return jsonify({"status": "error", "message": f"답변 생성 중 오류 발생: {e}"}), 500
+
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='127.0.0.1', port=5000, debug=True)

@@ -5,3 +5,7 @@ docling
 pdfplumber
 sentence-transformers
 langchain_ollama
+PyQt6
+pandas
+torch
+torchaudio
