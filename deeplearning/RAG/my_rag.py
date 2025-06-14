@@ -3,7 +3,7 @@ import pandas as pd
 import pdfplumber
 
 # LangChain 및 관련 라이브러리
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
