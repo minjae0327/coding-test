@@ -20,7 +20,8 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 class RAG:
     def __init__(self, path):
-        self.device = torch.device("cuda" if torch.backends.mps.is_available() else "cpu")
+        # self.device = torch.device("cuda" if torch.backends.mps.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         elements = partition_pdf(
             filename=path,

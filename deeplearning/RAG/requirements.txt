@@ -9,3 +9,6 @@ PyQt6
 pandas
 torch
 torchaudio
+"unstructured[pdf]"
+"camelot-py[cv]"
+openai
