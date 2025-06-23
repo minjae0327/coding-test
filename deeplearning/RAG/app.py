@@ -77,3 +77,7 @@ def ask_question():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5050, debug=True)
+    
+# 서버에서 요청이 들어오면 aws에서 파일을 가져오는
+# 그 후 처리 후에 db에 다시 저장하는 코드?
+# 벡터스토어 저장?
