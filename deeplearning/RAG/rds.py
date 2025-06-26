@@ -5,12 +5,11 @@ from mysql.connector import Error
 class DatabaseManager:
     def __init__(self):
         #RDS info
-        self.host = "database-2.cxyce2ii8umg.ap-southeast-2.rds.amazonaws.com" #mysql workbench에 연결할 때 썼던 그 aws엔드포인트입니다.
+        self.host = "localhost" #mysql workbench에 연결할 때 썼던 그 aws엔드포인트입니다.
         self.port = 3306 #포트번호는 손대지않으셨다면 3306 고정
-        self.username = "minjae" #rds 만드실 때 입력하셨던 이름
-        self.database = "rag" #RDS DB내에서 연결하고싶은 데이터베이스 이름입니다.
-        #workbench연결만 하신분들은 workbench에 들어가서 연결해둔 aws rds에 접속하여 CREATE DATABASE name 하시면 생성됩니다.
-        self.password = "lovepool03"
+        self.username = "root" #rds 만드실 때 입력하셨던 이름
+        self.database = "rag" #DB내에서 연결하고싶은 데이터베이스 이름입니다.
+        self.password = "minjae0327"
 
         self.db_config = {
             'host': self.host,

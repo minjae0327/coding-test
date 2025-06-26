@@ -2,7 +2,7 @@ import os
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 
-from test_rag import RAG
+from deeplearning.RAG.rag_processor import RAG
 
 # --- OpenAI API 키 설정 ---
 # 코드를 실행하기 전에 터미널에서 OpenAI API 키를 환경 변수로 설정해야 합니다.
