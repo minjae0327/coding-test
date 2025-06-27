@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify
 
 # 직접 만든 모듈 임포트
 from database_manager import DatabaseManager
-from rag_processor import RAG
+from rag_processor import RAGProcessor
 
 # --- 애플리케이션 초기 설정 ---
 app = Flask(__name__)
@@ -14,7 +14,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # 데이터베이스 및 RAG 처리기 인스턴스 생성
 db_manager = DatabaseManager()
-rag_processor = RAG(db_manager)
+rag_processor = RAGProcessor(db_manager)
 
 # 애플리케이션이 처음 시작될 때 데이터베이스 테이블 설정
 with app.app_context():
