@@ -16,12 +16,14 @@ class DatabaseManager:
         self.database_name = "rag"
         self._ensure_database_exists()
 
+
     def _get_connection(self, db_name=None):
         """데이터베이스 연결을 생성하는 내부 메서드"""
         config = self.db_config.copy()
         if db_name:
             config['database'] = db_name
         return mysql.connector.connect(**config)
+
 
     def _ensure_database_exists(self):
         """'rag' 데이터베이스가 없으면 생성합니다."""
@@ -38,6 +40,7 @@ class DatabaseManager:
                 connection.close()
         # 'rag' 데이터베이스를 기본 연결 설정에 추가
         self.db_config['database'] = self.database_name
+
 
     def execute_query(self, query, params=None, fetch=None):
         """일반 쿼리 실행을 위한 범용 메서드"""
@@ -64,6 +67,7 @@ class DatabaseManager:
                 cursor.close()
                 connection.close()
         return result
+
 
     def setup_tables(self):
         """RAG 서비스에 필요한 모든 테이블을 순서대로 생성합니다."""
@@ -135,44 +139,69 @@ class DatabaseManager:
         # db 조작 기능
         #-----------------------------------------------------------
         
-        def check_table_data(self, table_name):
-            """데이터베이스에 특정 테이블에 저장된 데이터를 조회하여 확인합니다."""
-            connection = None
-            cursor = None
+    def check_table_data(self, table_name):
+        """데이터베이스에 특정 테이블에 저장된 데이터를 조회하여 확인합니다."""
+        connection = None
+        cursor = None
+        
+        try:
+            connection = mysql.connector.connect(**self.db_config)
+            cursor = connection.cursor()
             
-            try:
-                connection = mysql.connector.connect(**self.db_config)
-                cursor = connection.cursor()
+            # 데이터 조회 쿼리만 실행
+            cursor.execute(f"SELECT * FROM {table_name};")
+            rows = cursor.fetchall()
+            
+            if not rows:
+                print("테이블에 데이터가 없습니다.")
+            else:
+                column_name = [decs[0] for decs in cursor.description]
                 
-                # 데이터 조회 쿼리만 실행
-                cursor.execute(f"SELECT * FROM {table_name};")
-                rows = cursor.fetchall()
-                
-                if not rows:
-                    print("테이블에 데이터가 없습니다.")
-                else:
-                    column_name = [decs[0] for decs in cursor.description]
-                    
-                    print(f"\n--- '{table_name}' 테이블 데이터 ---")
-                    for row in rows:
-                        record_details = []
-                        # 4. 컬럼명과 값을 zip으로 묶어서 '컬럼명: 값' 형태로 만들기
-                        for col_name, value in zip(column_name, row):
-                            record_details.append(f"{col_name}: {value}")
-                            
-                        print("\n".join(record_details))
+                print(f"\n--- '{table_name}' 테이블 데이터 ---")
+                for row in rows:
+                    record_details = []
+                    # 4. 컬럼명과 값을 zip으로 묶어서 '컬럼명: 값' 형태로 만들기
+                    for col_name, value in zip(column_name, row):
+                        record_details.append(f"{col_name}: {value}")
                         
+                    print("\n".join(record_details))
+                    
 
-                print("---------------------------------")
+            print("---------------------------------")
 
-            except Error as e:
-                print(f"오류 발생: {e}")
-            finally:
-                if connection and connection.is_connected():
-                    if cursor:
-                        cursor.close()
-                    connection.close()
-                    print("\n연결이 종료되었습니다.")
+        except Error as e:
+            print(f"오류 발생: {e}")
+        finally:
+            if connection and connection.is_connected():
+                if cursor:
+                    cursor.close()
+                connection.close()
+                print("\n연결이 종료되었습니다.")
+                
+                
+                
+     # --- 새로 추가된 함수 ---
+    def check_all_tables_data(self):
+        """데이터베이스의 모든 테이블과 그 안의 모든 데이터를 조회하여 출력합니다."""
+        print("\n===== 모든 테이블 데이터 조회 시작 =====")
+        try:
+            # 1. 모든 테이블 목록 가져오기
+            tables = self.execute_query("SHOW TABLES;", fetch='all')
+            
+            if not tables:
+                print("데이터베이스에 테이블이 없습니다.")
+                return
+
+            # 2. 각 테이블을 순회하며 데이터 조회 함수 호출
+            for table in tables:
+                # execute_query가 딕셔너리 리스트를 반환하므로, 첫 번째 키의 값을 테이블 이름으로 사용
+                table_name = list(table.values())[0]
+                self.check_table_data(table_name)
+                
+        except Error as e:
+            print(f"오류 발생: {e}")
+        finally:
+            print("\n===== 모든 테이블 데이터 조회 완료 =====")
 
 
 
@@ -316,3 +345,49 @@ class DatabaseManager:
                     cursor.close()
                 connection.close()
                 print("\n연결이 종료되었습니다.")
+                
+                
+    #------------------------------------------------------------
+    #   모든 데이터 삭제 함수 
+    #------------------------------------------------------------    
+    def clear_all_data_from_tables(self):
+        """
+        데이터베이스의 모든 테이블 구조는 유지한 채, 모든 데이터만 삭제(TRUNCATE)합니다.
+        외래 키 제약 조건을 처리하기 위해 일시적으로 비활성화 후 다시 활성화합니다.
+        """
+        connection = None
+        cursor = None
+        print("\n===== 모든 테이블의 데이터 삭제를 시작합니다... =====")
+        
+        try:
+            connection = self._get_connection(self.database_name)
+            cursor = connection.cursor()
+
+            # 1. 외래 키 제약 조건 비활성화 (TRUNCATE 실행을 위해 필수)
+            print("외래 키 제약 조건을 임시로 비활성화합니다.")
+            cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+
+            # 2. 모든 테이블 목록 가져오기
+            cursor.execute("SHOW TABLES;")
+            tables = [table[0] for table in cursor.fetchall()]
+
+            # 3. 각 테이블을 순회하며 TRUNCATE 실행
+            if tables:
+                for table_name in tables:
+                    print(f" -> '{table_name}' 테이블의 데이터를 삭제합니다.")
+                    cursor.execute(f"TRUNCATE TABLE `{table_name}`;")
+                print("\n모든 테이블의 데이터가 성공적으로 삭제되었습니다.")
+            else:
+                print("데이터베이스에 테이블이 없습니다.")
+
+        except Error as e:
+            print(f"데이터 삭제 중 오류가 발생했습니다: {e}")
+        
+        finally:
+            # 4. 오류 발생 여부와 관계없이, 반드시 외래 키 제약 조건을 다시 활성화
+            if connection and connection.is_connected():
+                print("외래 키 제약 조건을 다시 활성화합니다.")
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+                cursor.close()
+                connection.close()
+            print("===== 데이터 삭제 작업 완료 =====")
