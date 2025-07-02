@@ -76,20 +76,44 @@ class DatabaseManager:
             """
             CREATE TABLE IF NOT EXISTS Users (
                 user_id INT AUTO_INCREMENT PRIMARY KEY,
+                -- 사용자를 식별하는 고유 번호 (기본 키)
+
                 email VARCHAR(255) NOT NULL UNIQUE,
+                -- 로그인에 사용할 이메일 (반드시 필요, 중복 불가)
+
                 password_hash VARCHAR(255) NOT NULL,
+                -- 비밀번호 원문을 암호화하여 저장
+
+                username VARCHAR(50) NOT NULL UNIQUE,
+                -- 사용자가 사용할 닉네임 (반드시 필요, 중복 불가)
+
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                -- 사용자 가입일
             );
             """,
             # 2. Documents 테이블
             """
             CREATE TABLE IF NOT EXISTS Documents (
                 document_id INT AUTO_INCREMENT PRIMARY KEY,
+                -- 각 문서를 식별하는 고유 번호
+
                 user_id INT NOT NULL,
+                -- 이 문서를 업로드한 사용자의 ID
+
                 file_name VARCHAR(255) NOT NULL,
+                -- 업로드된 원본 파일 이름 (예: "my_paper.pdf")
+
                 file_path VARCHAR(512) NOT NULL UNIQUE,
+                -- 파일이 실제 저장된 경로 (예: S3 경로). 중복될 수 없음
+
                 status ENUM('업로드중', '처리중', '완료', '실패') NOT NULL DEFAULT '업로드중',
+                -- 문서의 현재 처리 상태
+
                 uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                -- 문서 업로드 시점
+
+                -- 외래 키 설정: user_id는 Users 테이블의 user_id를 참조
+                -- ON DELETE CASCADE: 만약 Users 테이블에서 사용자가 삭제되면, 관련된 문서도 함께 삭제됨
                 FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
             );
             """,
@@ -97,12 +121,26 @@ class DatabaseManager:
             """
             CREATE TABLE IF NOT EXISTS Sessions (
                 session_id VARCHAR(36) PRIMARY KEY,
+                -- 각 대화 세션을 식별하는 고유 ID (UUID 사용 권장)
+
                 user_id INT NOT NULL,
+                -- 이 세션을 소유한 사용자의 ID
+
                 document_id INT NULL,
+                -- 이 대화가 특정 문서를 기반으로 할 경우 해당 문서 ID (필수 아님)
+
                 session_title VARCHAR(255) NOT NULL,
+                -- 대화방 제목
+
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                -- 세션 생성 시점
+
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                -- 마지막 대화가 오고 간 시점 (자동 업데이트)
+
+                -- 외래 키 설정
                 FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE,
+                -- ON DELETE SET NULL: 참조하던 문서가 삭제되어도 대화 세션 기록은 남기고, document_id만 NULL로 변경
                 FOREIGN KEY (document_id) REFERENCES Documents(document_id) ON DELETE SET NULL
             );
             """,
@@ -110,21 +148,46 @@ class DatabaseManager:
             """
             CREATE TABLE IF NOT EXISTS Document_Chunks (
                 chunk_id INT AUTO_INCREMENT PRIMARY KEY,
-                document_id INT NOT NULL,
+                -- 각 문서 조각의 고유 번호
+                
+                session_id VARCHAR(36) NOT NULL,
+                -- 이 질의응답이 어느 세션에 속하는지 식별
+
+                chunk_text TEXT NOT NULL,
+                -- 잘게 나뉜 텍스트 조각의 원본 내용
+
                 vector_id VARCHAR(255) NOT NULL UNIQUE,
+                -- 벡터 DB(예: Pinecone, Milvus)에 저장된 벡터를 가리키는 고유 ID
+
+                -- 검색 성능 향상을 위해 vector_id에 인덱스 추가
                 INDEX (vector_id),
-                FOREIGN KEY (document_id) REFERENCES Documents(document_id) ON DELETE CASCADE
+                
+                -- 외래 키 설정: 참조하던 세션이 삭제되면, 관련된 모든 질의응답 기록도 함께 삭제
+                FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE
             );
             """,
             # 5. QnA_Logs 테이블
             """
             CREATE TABLE IF NOT EXISTS QnA_Logs (
                 qna_id INT AUTO_INCREMENT PRIMARY KEY,
+                -- 각 질의응답 쌍의 고유 번호
+
                 session_id VARCHAR(36) NOT NULL,
+                -- 이 질의응답이 어느 세션에 속하는지 식별
+
                 user_question TEXT NOT NULL,
+                -- 사용자가 입력한 질문 원문
+
                 model_answer MEDIUMTEXT NOT NULL,
+                -- 언어 모델이 생성한 답변 내용 (길 수 있으므로 MEDIUMTEXT 사용)
+
                 retrieved_context MEDIUMTEXT,
+                -- 답변 생성 시 RAG가 참고한 문서 조각들의 내용 (디버깅 및 분석에 유용)
+
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                -- 질의응답이 발생한 시점
+
+                -- 외래 키 설정: 참조하던 세션이 삭제되면, 관련된 모든 질의응답 기록도 함께 삭제
                 FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE
             );
             """
