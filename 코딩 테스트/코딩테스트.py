@@ -1,36 +1,14 @@
-import sys
-from collections import defaultdict, deque
-
-input = sys.stdin.readline
-n, m, start = map(int, input().split())
-
-dist = defaultdict(list)
-
-for _ in range(m):
-    u, v = map(int, input().split())
-    dist[u].append(v)
-    dist[v].append(u)
-for i in range(1, n+1):
-    dist[i].sort()
-
-visited = [0] * (n+1)
-order = 1
-
-def dfs(start):
-    global order
-    stack = [start]
-
-    while stack:
-        node = stack.pop()
-        if visited[node] != 0:
-            continue
-        visited[node] = order
-        order += 1
-        for neighbor in reversed(dist[node]):
-            if visited[neighbor] == 0:
-                stack.append(neighbor)
-
-dfs(start)
-
-for i in range(1, n+1):
-    print(visited[i])
+def answer(n, count):
+    print(f"{'____'*count}\"재귀함수가 뭔가요?\"")
+    if n > 0:
+        print(f"{'____'*count}\"잘 들어보게. 옛날옛날 한 산 꼭대기에 이세상 모든 지식을 통달한 선인이 있었어.\n{'____'*count}마을 사람들은 모두 그 선인에게 수많은 질문을 했고, 모두 지혜롭게 대답해 주었지.\n{'____'*count}그의 답은 대부분 옳았다고 하네. 그런데 어느 날, 그 선인에게 한 선비가 찾아와서 물었어.\"")
+        answer(n-1, count + 1)
+    else:  
+        print(f"{'____'*count}\"재귀함수는 자기 자신을 호출하는 함수라네\"")
+        print(f"{'____'*count}라고 답변하였지.")
+        return
+    print(f"{'____'*count}라고 답변하였지.")
+    
+n = int(input())
+print("어느 한 컴퓨터공학과 학생이 유명한 교수님을 찾아가 물었다.")
+answer(n, 0)
