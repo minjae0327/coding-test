@@ -22,10 +22,10 @@ async def lifespan(app: FastAPI):
     # 애플리케이션 시작 시 실행될 코드
     print("서버 시작: 데이터베이스 및 테이블 설정을 시작합니다.")
     db_manager.setup_tables()
-    db_manager.execute_query(
-        "INSERT IGNORE INTO Users (user_id, email, password_hash) VALUES (%s, %s, %s)",
-        (1, 'test@example.com', 'hashed_password_placeholder')
-    )
+    # db_manager.execute_query(
+    #     "INSERT IGNORE INTO Users (user_id, email, password_hash) VALUES (%s, %s, %s)",
+    #     (1, 'test@example.com', 'hashed_password_placeholder')
+    # )
     print("FastAPI 서버 시작 준비 완료.")
     
     yield # 이 지점에서 애플리케이션이 실행됩니다.
@@ -44,7 +44,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 class UserCreate(BaseModel):
     email: str
     password: str
-    username: str
 
 class UserResponse(BaseModel):
     user_id: int
@@ -54,6 +53,14 @@ class SessionResponse(BaseModel):
     session_id: str
     document_id: int
     session_title: str
+    
+class SessionInfo(BaseModel):
+    session_id: str
+    session_title: str
+
+class QnALog(BaseModel):
+    user_question: str
+    model_answer: str
 
 class AskRequest(BaseModel):
     question: str
@@ -71,15 +78,17 @@ class AskResponse(BaseModel):
 async def signup(user: UserCreate):
     """회원가입 엔드포인트"""
     hashed_password = f"hashed_{user.password}"
-    username = user.username.split('@')[0]
+    username = user.email.split('@')[0]
+    print(username)
     try:
         user_id = db_manager.execute_query(
-            "INSERT INTO Users (email, password_hash, username) VALUES (%s, %s, %s)",
-            (user.email, hashed_password, username)
+            "INSERT INTO Users (email, password_hash) VALUES (%s, %s)",
+            (user.email, hashed_password)
         )
         return UserResponse(user_id=user_id, email=user.email)
     except Exception as e:
         raise HTTPException(status_code=400, detail="이메일이 이미 존재합니다.")
+
 
 @app.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -90,6 +99,35 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     if not user or f"hashed_{form_data.password}" != user['password_hash']:
         raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 잘못되었습니다.")
     return {"message": "로그인 성공", "user_id": user['user_id']}
+
+
+@app.get("/sessions", response_model=List[SessionInfo])
+async def get_sessions_for_user(user_id: int):
+    """
+    특정 사용자의 모든 세션 목록을 최신순으로 반환합니다.
+    """
+    sessions = db_manager.execute_query(
+        "SELECT session_id, session_title FROM Sessions WHERE user_id = %s ORDER BY created_at ASC",
+        (user_id,), fetch='all'
+    )
+    if not sessions:
+        return []
+    return sessions
+
+
+@app.get("/sessions/{session_id}/history", response_model=List[QnALog])
+async def get_session_history(session_id: str):
+    """
+    특정 세션의 모든 QnA 로그(대화 기록)를 시간순으로 반환합니다.
+    """
+    history = db_manager.execute_query(
+        "SELECT user_question, model_answer FROM QnA_Logs WHERE session_id = %s ORDER BY timestamp ASC",
+        (session_id,), fetch='all'
+    )
+    if not history:
+        return []
+    return history
+
 
 # 2. 세션 및 파일 관련 엔드포인트
 @app.post("/sessions/create_with_pdf", response_model=SessionResponse)
@@ -128,6 +166,7 @@ async def create_session_with_pdf(user_id: int, file: UploadFile = File(...)):
         if document_id:
             db_manager.execute_query("UPDATE Documents SET status = '실패' WHERE document_id = %s", (document_id,))
         raise HTTPException(status_code=500, detail=f"세션 생성 중 오류: {str(e)}")
+
 
 # 3. 질문/답변 엔드포인트
 @app.post("/ask", response_model=AskResponse)
