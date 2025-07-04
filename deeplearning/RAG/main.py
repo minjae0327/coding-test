@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 
 # --- 애플리케이션 초기 설정 ---
 # lifespan 핸들러를 FastAPI 앱에 등록합니다.
-app = FastAPI(title="RAG Service with Auth and Sessions", lifespan=lifespan)
+app = FastAPI(title="RAG Service", lifespan=lifespan)
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -44,6 +44,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 class UserCreate(BaseModel):
     email: str
     password: str
+    username: str
 
 class UserResponse(BaseModel):
     user_id: int
@@ -69,11 +70,12 @@ class AskResponse(BaseModel):
 @app.post("/signup", response_model=UserResponse)
 async def signup(user: UserCreate):
     """회원가입 엔드포인트"""
-    hashed_password = f"hashed_{user.password}" 
+    hashed_password = f"hashed_{user.password}"
+    username = user.username.split('@')[0]
     try:
         user_id = db_manager.execute_query(
-            "INSERT INTO Users (email, password_hash) VALUES (%s, %s)",
-            (user.email, hashed_password)
+            "INSERT INTO Users (email, password_hash, username) VALUES (%s, %s, %s)",
+            (user.email, hashed_password, username)
         )
         return UserResponse(user_id=user_id, email=user.email)
     except Exception as e:
