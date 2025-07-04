@@ -78,8 +78,7 @@ class AskResponse(BaseModel):
 async def signup(user: UserCreate):
     """회원가입 엔드포인트"""
     hashed_password = f"hashed_{user.password}"
-    username = user.email.split('@')[0]
-    print(username)
+    # username = user.email.split('@')[0]
     try:
         user_id = db_manager.execute_query(
             "INSERT INTO Users (email, password_hash) VALUES (%s, %s)",
