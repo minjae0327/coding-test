@@ -19,7 +19,6 @@ rag_processor = RAGProcessor(db_manager)
 # --- Lifespan 이벤트 핸들러 정의 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 애플리케이션 시작 시 실행될 코드
     print("서버 시작: 데이터베이스 및 테이블 설정을 시작합니다.")
     db_manager.setup_tables()
     # db_manager.execute_query(
@@ -69,11 +68,8 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     answer: str
 
-# --- API 엔드포인트 정의 ---
 
-# @app.on_event("startup") <-- 이 부분은 이제 lifespan으로 대체되었습니다.
 
-# 1. 인증 관련 엔드포인트
 @app.post("/signup", response_model=UserResponse)
 async def signup(user: UserCreate):
     """회원가입 엔드포인트"""
@@ -97,6 +93,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     )
     if not user or f"hashed_{form_data.password}" != user['password_hash']:
         raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 잘못되었습니다.")
+    
     return {"message": "로그인 성공", "user_id": user['user_id']}
 
 
@@ -111,6 +108,7 @@ async def get_sessions_for_user(user_id: int):
     )
     if not sessions:
         return []
+    
     return sessions
 
 
@@ -125,10 +123,10 @@ async def get_session_history(session_id: str):
     )
     if not history:
         return []
+    
     return history
 
 
-# 2. 세션 및 파일 관련 엔드포인트
 @app.post("/sessions/create_with_pdf", response_model=SessionResponse)
 async def create_session_with_pdf(user_id: int, file: UploadFile = File(...)):
     """PDF 파일을 업로드하여 새로운 채팅 세션을 생성합니다."""
@@ -149,7 +147,7 @@ async def create_session_with_pdf(user_id: int, file: UploadFile = File(...)):
             "INSERT INTO Documents (user_id, file_name, file_path) VALUES (%s, %s, %s)",
             (doc_data['user_id'], doc_data['file_name'], doc_data['file_path'])
         )
-
+        
         session_id = str(uuid.uuid4())
         session_title = original_filename
         db_manager.execute_query(
@@ -167,7 +165,6 @@ async def create_session_with_pdf(user_id: int, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"세션 생성 중 오류: {str(e)}")
 
 
-# 3. 질문/답변 엔드포인트
 @app.post("/ask", response_model=AskResponse)
 async def ask_question(request: AskRequest):
     """특정 세션에 대해 질문하고 답변을 받으며, 로그를 저장합니다."""

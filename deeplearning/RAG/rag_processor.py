@@ -1,5 +1,6 @@
 import torch
 import uuid
+import chromadb # chromadb 클라이언트를 직접 사용하기 위해 임포트
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
@@ -11,19 +12,43 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.prompts import PromptTemplate
 
-
 class RAGProcessor:
     def __init__(self, db_manager):
+        """
+        RAGProcessor 초기화 (영속성 보장 버전)
+        """
         self.db_manager = db_manager
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        print(f"Using device: {self.device}")
+
         self.embedding_model = HuggingFaceEmbeddings(
             model_name="dragonkue/BGE-m3-ko",
             model_kwargs={'device': self.device},
             encode_kwargs={'normalize_embeddings': True},
         )
-        self.llm = OllamaLLM(model="gemma3:4b") # 또는 다른 LLM
-        # ChromaDB가 저장될 디렉토리
-        self.persist_directory = "chroma_db_store"
+        self.llm = OllamaLLM(model="gemma3:4b")
+        
+        # --- 영속성을 위한 ChromaDB 설정 ---
+        # 벡터 데이터를 영구적으로 저장할 폴더 경로
+        self.persist_directory = "/chroma_db_persistent_store"
+        
+        # 디스크에 저장된 데이터를 사용하는 ChromaDB 클라이언트 초기화
+        self.chroma_client = chromadb.PersistentClient(path=self.persist_directory)
+        
+        # 모든 문서의 벡터를 저장할 단일 컬렉션 이름
+        self.collection_name = "rag_main_collection"
+        
+        # LangChain과 호환되는 Chroma 벡터스토어 인스턴스 생성
+        # 이 인스턴스는 클래스 내에서 계속 재사용됩니다.
+        self.vectorstore = Chroma(
+            client=self.chroma_client,
+            collection_name=self.collection_name,
+            embedding_function=self.embedding_model,
+        )
+        
+        print(f"✅ ChromaDB가 '{self.persist_directory}' 경로에서 성공적으로 로드되었습니다.")
+        print(f"현재 컬렉션 '{self.collection_name}'의 아이템 개수: {self.vectorstore._collection.count()}")
 
 
     def _preprocess_pdf(self, file_path):
@@ -43,58 +68,54 @@ class RAGProcessor:
 
 
     def process_and_store_document(self, file_path, document_id):
-        """PDF를 처리하고, 벡터화하여 ChromaDB에 저장한 뒤, 메타데이터를 MySQL에 저장합니다."""
-        print(f"'{file_path}' 파일 처리 시작...")
+        """PDF를 처리하고, 벡터화하여 단일 컬렉션에 메타데이터와 함께 저장합니다."""
+        print(f"'{file_path}' 파일 처리 시작 (문서 ID: {document_id})...")
         docs = self._preprocess_pdf(file_path)
         
-        # 각 조각에 고유한 벡터 ID를 부여합니다.
-        vector_ids = [str(uuid.uuid4()) for _ in docs]
+        if not docs:
+            print("⚠️ 경고: PDF에서 텍스트를 추출하지 못했거나 내용이 없습니다.")
+            return False
 
-        # Chroma 벡터 저장소 생성 및 데이터 추가
-        vectorstore = Chroma.from_documents(
-            documents=docs,
-            embedding=self.embedding_model,
-            ids=vector_ids, # 각 조각에 고유 ID 부여
-            collection_name=f"doc_{document_id}", # 각 문서별로 별도의 컬렉션 사용
-            persist_directory=self.persist_directory
-        )
-        vectorstore.persist() # 변경사항 디스크에 저장
-        print(f"문서 ID {document_id}에 대한 벡터 저장 완료. 총 {len(docs)}개 조각.")
+        # 각 텍스트 조각(청크)에 메타데이터를 추가합니다.
+        # "document_id"를 통해 어떤 문서에서 온 조각인지 구분할 수 있습니다.
+        for doc in docs:
+            doc.metadata = {"document_id": str(document_id)}
 
-        # MySQL의 Document_Chunks 테이블에 메타데이터 저장
-        for v_id in vector_ids:
-            chunk_data = {
-                'document_id': document_id,
-                'vector_id': v_id
-            }
-            self.db_manager.execute_query(
-                "INSERT INTO Document_Chunks (document_id, vector_id) VALUES (%s, %s)",
-                (chunk_data['document_id'], chunk_data['vector_id'])
-            )
-        print("MySQL에 벡터 메타데이터 저장 완료.")
+        # 미리 생성된 vectorstore 인스턴스의 단일 컬렉션에 새로운 문서 조각들을 '추가'합니다.
+        self.vectorstore.add_documents(documents=docs)
+        
+        print(f"✅ 문서 ID {document_id}에 대한 벡터 저장 완료. 총 {len(docs)}개 조각.")
+        print(f"이제 컬렉션 '{self.collection_name}'의 총 아이템 개수: {self.vectorstore._collection.count()}")
+        
+        # 중요: 이제 MySQL의 Document_Chunks 테이블에 메타데이터를 저장할 필요가 없습니다.
         return True
 
 
     def get_answer_from_document(self, question, document_id):
-        """저장된 벡터 저장소를 로드하고, 질문에 대한 답변을 생성합니다."""
-        # 디스크에 저장된 ChromaDB 로드
-        vectorstore = Chroma(
-            persist_directory=self.persist_directory,
-            embedding_function=self.embedding_model,
-            collection_name=f"doc_{document_id}"
+        """
+        질문과 document_id를 받아, 해당 문서의 내용만을 바탕으로 답변을 생성합니다.
+        """
+        print(f"문서 ID {document_id}의 내용으로 질문에 답변을 생성합니다.")
+        
+        # --- 특정 문서의 내용만 검색하도록 Retriever 설정 ---
+        # ChromaDB의 메타데이터 필터링 기능을 사용하여
+        # 현재 질문과 관련된 `document_id`를 가진 조각들만 검색 대상으로 삼습니다.
+        retriever = self.vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 5, "filter": {"document_id": str(document_id)}}
         )
-        retriever = vectorstore.as_retriever()
 
         prompt = PromptTemplate.from_template(
-            """You are an assistant for question-answering tasks. 
-            Use the following pieces of retrieved context to answer the question. 
-            Answer in Korean.
+            """당신은 질문-답변 과제를 수행하는 어시스턴트입니다. 
+            검색된 다음 컨텍스트 조각을 사용하여 질문에 답변하세요. 
+            답변은 반드시 한국어로 작성해야 합니다.
 
-            #Context: {context}
-            #Question: {question}
-            #Answer:"""
+            #컨텍스트: {context}
+            #질문: {question}
+            #답변:"""
         )
 
+        # LangChain Expression Language (LCEL)을 사용한 체인 구성
         chain = (
             {"context": retriever, "question": RunnablePassthrough()}
             | prompt
@@ -102,7 +123,11 @@ class RAGProcessor:
             | StrOutputParser()
         )
         
+        # 체인 실행 및 결과 반환
         result = chain.invoke(question)
-        # RAG 과정에서 검색된 context도 함께 반환하면 좋습니다.
-        # 이 예제에서는 답변만 반환합니다.
-        return {"answer": result, "context": "retrieved context here"} # context 부분은 실제 구현에서 채워야 함
+        
+        # 답변의 근거가 된 컨텍스트 조각들을 함께 반환 (디버깅 및 확인용)
+        retrieved_docs = retriever.invoke(question)
+        context_for_log = "\n---\n".join([doc.page_content for doc in retrieved_docs])
+        
+        return {"answer": result, "context": context_for_log}
