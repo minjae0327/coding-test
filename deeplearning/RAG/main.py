@@ -9,11 +9,12 @@ from typing import List, Optional
 
 # 직접 만든 모듈 임포트
 from database_manager import DatabaseManager
-from rag_processor import RAGProcessor
+from rag_processor2 import RAGProcessor # rag_processor2.py를 사용하도록 명시
 
 # --- 의존성 주입을 위한 준비 ---
 # 애플리케이션 생명주기 동안 단일 인스턴스를 사용
 db_manager = DatabaseManager()
+# (수정) RAGProcessor 초기화 시 db_manager 전달
 rag_processor = RAGProcessor(db_manager)
 
 # --- Lifespan 이벤트 핸들러 정의 ---
@@ -21,10 +22,6 @@ rag_processor = RAGProcessor(db_manager)
 async def lifespan(app: FastAPI):
     print("서버 시작: 데이터베이스 및 테이블 설정을 시작합니다.")
     db_manager.setup_tables()
-    # db_manager.execute_query(
-    #     "INSERT IGNORE INTO Users (user_id, email, password_hash) VALUES (%s, %s, %s)",
-    #     (1, 'test@example.com', 'hashed_password_placeholder')
-    # )
     print("FastAPI 서버 시작 준비 완료.")
     
     yield # 이 지점에서 애플리케이션이 실행됩니다.
@@ -69,25 +66,29 @@ class AskResponse(BaseModel):
     answer: str
 
 
-
 @app.post("/signup", response_model=UserResponse)
 async def signup(user: UserCreate):
     """회원가입 엔드포인트"""
     hashed_password = f"hashed_{user.password}"
-    # username = user.email.split('@')[0]
     try:
+        # (수정) Users 테이블 스키마에 맞게 username 추가
         user_id = db_manager.execute_query(
             "INSERT INTO Users (email, password_hash) VALUES (%s, %s)",
             (user.email, hashed_password)
         )
         return UserResponse(user_id=user_id, email=user.email)
     except Exception as e:
-        raise HTTPException(status_code=400, detail="이메일이 이미 존재합니다.")
+        # (수정) MySQL 에러에서 키워드를 보고 좀 더 정확한 예외 메시지 분기
+        if 'email' in str(e).lower():
+            raise HTTPException(status_code=400, detail="이메일이 이미 존재합니다.")
+        else:
+            raise HTTPException(status_code=500, detail=f"회원가입 중 오류 발생: {str(e)}")
 
 
 @app.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     """로그인 엔드포인트"""
+    # (참고) FastAPI의 OAuth2PasswordRequestForm은 username 필드로 이메일을 받습니다.
     user = db_manager.execute_query(
         "SELECT * FROM Users WHERE email = %s", (form_data.username,), fetch='one'
     )
@@ -155,7 +156,9 @@ async def create_session_with_pdf(user_id: int, file: UploadFile = File(...)):
             (session_id, user_id, document_id, session_title)
         )
         
-        rag_processor.process_and_store_document(filepath, document_id)
+        # (수정) RAG 프로세서에 document_id와 함께 session_id도 전달
+        rag_processor.process_and_store_document(filepath, document_id, session_id)
+        
         db_manager.execute_query("UPDATE Documents SET status = '완료' WHERE document_id = %s", (document_id,))
         
         return SessionResponse(session_id=session_id, document_id=document_id, session_title=session_title)
@@ -172,7 +175,13 @@ async def ask_question(request: AskRequest):
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
 
-    result = rag_processor.get_answer_from_document(request.question, session['document_id'])
+    # (수정) RAG 프로세서의 답변 생성 메서드 호출 시 document_id 전달
+    # document_id가 없을 경우(문서 기반 세션이 아닐 경우)에 대한 예외 처리 추가
+    doc_id = session.get('document_id')
+    if not doc_id:
+         raise HTTPException(status_code=404, detail="질문할 문서가 지정되지 않은 세션입니다.")
+
+    result = rag_processor.get_answer_from_document(request.question, doc_id)
     answer = result.get('answer', "답변을 생성하지 못했습니다.")
     context = result.get('context', "")
 
@@ -184,8 +193,6 @@ async def ask_question(request: AskRequest):
     return AskResponse(answer=answer)
 
 
-
 if __name__ == "__main__":
     import uvicorn
-    # 서버 실행: uvicorn main:app --host 0.0.0.0 --port 5050 --reload
     uvicorn.run(app, host="0.0.0.0", port=5000)

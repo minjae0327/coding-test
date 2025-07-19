@@ -84,9 +84,6 @@ class DatabaseManager:
                 password_hash VARCHAR(255) NOT NULL,
                 -- 비밀번호 원문을 암호화하여 저장
 
-                username VARCHAR(50) NOT NULL UNIQUE,
-                -- 사용자가 사용할 닉네임 (반드시 필요, 중복 불가)
-
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 -- 사용자 가입일
             );
@@ -143,27 +140,24 @@ class DatabaseManager:
                 -- ON DELETE SET NULL: 참조하던 문서가 삭제되어도 대화 세션 기록은 남기고, document_id만 NULL로 변경
                 FOREIGN KEY (document_id) REFERENCES Documents(document_id) ON DELETE SET NULL
             );
-            """,
-            # 4. Document_Chunks 테이블
+           """,
+            # 4. Document_Chunks 테이블 (수정됨)
             """
             CREATE TABLE IF NOT EXISTS Document_Chunks (
                 chunk_id INT AUTO_INCREMENT PRIMARY KEY,
                 -- 각 문서 조각의 고유 번호
-                
-                session_id VARCHAR(36) NOT NULL,
-                -- 이 질의응답이 어느 세션에 속하는지 식별
+
+                document_id INT NOT NULL,
+                -- 이 조각이 어느 원본 문서에 속하는지 식별 (수정됨)
 
                 chunk_text TEXT NOT NULL,
                 -- 잘게 나뉜 텍스트 조각의 원본 내용
 
                 vector_id VARCHAR(255) NOT NULL UNIQUE,
-                -- 벡터 DB(예: Pinecone, Milvus)에 저장된 벡터를 가리키는 고유 ID
+                -- 벡터 DB에 저장된 벡터를 가리키는 고유 ID (UNIQUE 제약조건으로 자동 인덱싱됨)
 
-                -- 검색 성능 향상을 위해 vector_id에 인덱스 추가
-                INDEX (vector_id),
-                
-                -- 외래 키 설정: 참조하던 세션이 삭제되면, 관련된 모든 질의응답 기록도 함께 삭제
-                FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE
+                -- 외래 키 설정: 참조하던 문서가 삭제되면, 관련된 모든 조각도 함께 삭제 (수정됨)
+                FOREIGN KEY (document_id) REFERENCES Documents(document_id) ON DELETE CASCADE
             );
             """,
             # 5. QnA_Logs 테이블
