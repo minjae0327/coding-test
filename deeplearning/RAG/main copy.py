@@ -41,7 +41,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # --- API 요청/응답 모델 정의 (Pydantic) ---
-class UserCreate(BaseModel):
+class UserCreate(BaseModel):    
     email: str
     password: str
 

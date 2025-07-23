@@ -14,7 +14,6 @@ from rag_processor2 import RAGProcessor # rag_processor2.py를 사용하도록 �
 # --- 의존성 주입을 위한 준비 ---
 # 애플리케이션 생명주기 동안 단일 인스턴스를 사용
 db_manager = DatabaseManager()
-# (수정) RAGProcessor 초기화 시 db_manager 전달
 rag_processor = RAGProcessor(db_manager)
 
 # --- Lifespan 이벤트 핸들러 정의 ---
@@ -33,8 +32,8 @@ async def lifespan(app: FastAPI):
 # lifespan 핸들러를 FastAPI 앱에 등록합니다.
 app = FastAPI(title="RAG Service", lifespan=lifespan)
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+USER_DATA_ROOT = "./user_data"
+os.makedirs(USER_DATA_ROOT, exist_ok=True)
 
 # --- API 요청/응답 모델 정의 (Pydantic) ---
 class UserCreate(BaseModel):
@@ -69,6 +68,14 @@ class AskResponse(BaseModel):
 @app.post("/signup", response_model=UserResponse)
 async def signup(user: UserCreate):
     """회원가입 엔드포인트"""
+    # 이메일 중복 확인
+    existing_user = db_manager.execute_query(
+        "SELECT user_id FROM Users WHERE email = %s", (user.email,), fetch='one'
+    )
+    
+    if existing_user:
+        raise HTTPException(status_code=400, detail="이메일이 이미 존재합니다.")
+
     hashed_password = f"hashed_{user.password}"
     try:
         # (수정) Users 테이블 스키마에 맞게 username 추가
@@ -78,11 +85,7 @@ async def signup(user: UserCreate):
         )
         return UserResponse(user_id=user_id, email=user.email)
     except Exception as e:
-        # (수정) MySQL 에러에서 키워드를 보고 좀 더 정확한 예외 메시지 분기
-        if 'email' in str(e).lower():
-            raise HTTPException(status_code=400, detail="이메일이 이미 존재합니다.")
-        else:
-            raise HTTPException(status_code=500, detail=f"회원가입 중 오류 발생: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"회원가입 중 오류 발생: {str(e)}")
 
 
 @app.post("/login")
@@ -134,54 +137,66 @@ async def create_session_with_pdf(user_id: int, file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="PDF 파일만 업로드할 수 있습니다.")
     
+    session_id = str(uuid.uuid4())
+    session_path = os.path.join(USER_DATA_ROOT, str(user_id), session_id)
+    os.makedirs(session_path, exist_ok=True)
+    
     original_filename = os.path.basename(file.filename)
-    unique_filename = f"{uuid.uuid4().hex}_{original_filename}"
-    filepath = os.path.join(UPLOAD_DIR, unique_filename)
+    # unique_filename = f"{uuid.uuid4().hex}_{original_filename}"
+    filepath = os.path.join(session_path, original_filename)
 
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     document_id = None
     try:
-        doc_data = {'user_id': user_id, 'file_name': original_filename, 'file_path': filepath}
+        vector_path = rag_processor.process_and_store_document(filepath, user_id, session_id, session_path)
+        
+        if not vector_path:
+            raise HTTPException(status_code=500, detail="PDF 처리 및 벡터 변환에 실패했습니다.")
+        
         document_id = db_manager.execute_query(
             "INSERT INTO Documents (user_id, file_name, file_path) VALUES (%s, %s, %s)",
-            (doc_data['user_id'], doc_data['file_name'], doc_data['file_path'])
+            (user_id, original_filename, filepath)
         )
         
-        session_id = str(uuid.uuid4())
-        session_title = original_filename
         db_manager.execute_query(
-            "INSERT INTO Sessions (session_id, user_id, document_id, session_title) VALUES (%s, %s, %s, %s)",
-            (session_id, user_id, document_id, session_title)
+            """
+            INSERT INTO Sessions (session_id, user_id, document_id, session_title, vector_store_path) 
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (session_id, user_id, document_id, original_filename, vector_path)
         )
-        
-        # (수정) RAG 프로세서에 document_id와 함께 session_id도 전달
-        rag_processor.process_and_store_document(filepath, document_id, session_id)
         
         db_manager.execute_query("UPDATE Documents SET status = '완료' WHERE document_id = %s", (document_id,))
         
-        return SessionResponse(session_id=session_id, document_id=document_id, session_title=session_title)
+        return SessionResponse(session_id=session_id, document_id=document_id, session_title=original_filename)
     except Exception as e:
         if document_id:
             db_manager.execute_query("UPDATE Documents SET status = '실패' WHERE document_id = %s", (document_id,))
+        print(f"Error in create_session_with_pdf: {e}")
         raise HTTPException(status_code=500, detail=f"세션 생성 중 오류: {str(e)}")
 
 
 @app.post("/ask", response_model=AskResponse)
 async def ask_question(request: AskRequest):
     """특정 세션에 대해 질문하고 답변을 받으며, 로그를 저장합니다."""
-    session = db_manager.execute_query("SELECT * FROM Sessions WHERE session_id = %s", (request.session_id,), fetch='one')
+    session = db_manager.execute_query(
+        "SELECT * FROM Sessions WHERE session_id = %s",
+        (request.session_id,), fetch='one'
+    )
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
 
-    # (수정) RAG 프로세서의 답변 생성 메서드 호출 시 document_id 전달
-    # document_id가 없을 경우(문서 기반 세션이 아닐 경우)에 대한 예외 처리 추가
-    doc_id = session.get('document_id')
-    if not doc_id:
-         raise HTTPException(status_code=404, detail="질문할 문서가 지정되지 않은 세션입니다.")
+    vector_store_path = session.get('vector_store_path')
+    if not vector_store_path:
+        raise HTTPException(status_code=400, detail="이 세션에 대한 벡터 데이터 경로가 설정되지 않았습니다.")
 
-    result = rag_processor.get_answer_from_document(request.question, doc_id)
+    # doc_id = session.get('document_id')
+    # if not doc_id:
+    #      raise HTTPException(status_code=404, detail="질문할 문서가 지정되지 않은 세션입니다.")
+
+    result = rag_processor.get_answer_from_document(request.question, request.session_id, vector_store_path)
     answer = result.get('answer', "답변을 생성하지 못했습니다.")
     context = result.get('context', "")
 

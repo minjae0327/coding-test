@@ -1,8 +1,9 @@
 import os
 import re
 import uuid
+import shutil
 import torch
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.schema import Document
 
@@ -15,31 +16,19 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pdf_preprocessor import pdf_preprocessor
 
 
+
+
 class RAGProcessor:
     def __init__(self, db_manager):
         self.db_manager = db_manager
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
         
-        self.vectorstore = None
-        self.persist_directory = "./chroma_db"
-        
         self.embedding_model = HuggingFaceEmbeddings(
             model_name="dragonkue/BGE-m3-ko",
             model_kwargs={'device': self.device},
             encode_kwargs={'normalize_embeddings': True},
         )
-        
-        # (수정) 서버 시작 시 디스크에 저장된 벡터 DB를 불러오는 로직
-        if os.path.exists(self.persist_directory):
-            print(f"기존 벡터 DB를 로드합니다: {self.persist_directory}")
-            self.vectorstore = Chroma(
-                persist_directory=self.persist_directory,
-                embedding_function=self.embedding_model
-            )
-        else:
-            print("기존 벡터 DB가 없어 새로 생성됩니다.")
-            self.vectorstore = None
         
         
     def create_documents_from_markdown(self, markdown_content, source_path, document_id):
@@ -79,9 +68,8 @@ class RAGProcessor:
             
         return documents
 
-    # --- 2. 기존 로직 실행 및 all_chunks 생성 ---
+    
 
-    # chunk_markdown_logically 함수는 제공된 코드에 이미 정의되어 있다고 가정합니다.
     def chunk_markdown_logically(self, markdown_content):
         """
         문서의 구조(제목, 표, 이미지)를 이해하여 논리적인 단위로 청킹합니다.
@@ -129,48 +117,72 @@ class RAGProcessor:
         return chunks
      
     
-    def store_documents(self, all_chunks, session_id):
-        """ChromaDB에 문서를 저장하고, 메타데이터를 SQL DB에 기록합니다."""
-        if not all_chunks:
-            print("저장할 문서 조각이 없습니다.")
-            return
-
-        # (수정) 각 청크에 대한 고유 ID 생성 (SQL DB와 벡터 DB 연결고리)
-        chunk_ids = [str(uuid.uuid4()) for _ in all_chunks]
+    
+    def process_and_store_document(self, filepath, user_id, session_id, session_path):
+        """
+            pp.process()를 사용해서 pdf파일을 .md 파일로 변환
+            지정된 경로에 vectorstore 저장
+            그 후 vectorstore를 제외한 모든 파일 삭제
+        """
         
-        # (수정) 기존 DB에 데이터를 추가하는 방식으로 변경, IDs 지정
-        if self.vectorstore is None:
-            # 첫 업로드 시, 새로운 벡터 저장소 생성
-            self.vectorstore = Chroma.from_documents(
-                documents=all_chunks,
-                embedding=self.embedding_model,
-                ids=chunk_ids,
-                persist_directory=self.persist_directory
-            )
-        else:
-            # 기존 벡터 저장소에 문서 추가
-            self.vectorstore.add_documents(documents=all_chunks, ids=chunk_ids)
-
-        # (수정) db_manager를 사용하여 Document_Chunks 테이블에 정보 저장
-        print(f"'{session_id}' 세션에 대한 문서 조각 {len(all_chunks)}개를 DB에 저장합니다.")
-        for doc, vector_id in zip(all_chunks, chunk_ids):
-            self.db_manager.execute_query(
-                "INSERT INTO Document_Chunks (session_id, chunk_text, vector_id) VALUES (%s, %s, %s)",
-                (session_id, doc.page_content, vector_id)
-            )
-    
-    
-    def process_and_store_document(self, filepath, document_id, session_id):
-        pp = pdf_preprocessor()
-        with open(pp.process(filepath), 'r', encoding='utf-8') as f:
+        pp = pdf_preprocessor(session_path)
+        
+        md_file_path = pp.process(filepath)
+        with open(md_file_path, 'r', encoding='utf-8') as f:
             md_content = f.read()
         
-        all_chunks = self.create_documents_from_markdown(md_content, filepath, document_id)
-        self.store_documents(all_chunks, session_id)
+        all_chunks = self.create_documents_from_markdown(md_content, filepath, session_id)
+    
+        vector_store_path = os.path.join(session_path, "vector_store")
+        os.makedirs(vector_store_path, exist_ok=True)
+        
+        print(f"새로운 벡터스토어를 {vector_store_path}에 저장합니다")
+        vectorstore = Chroma.from_documents(
+            documents=all_chunks,
+            embedding=self.embedding_model,
+            persist_directory=vector_store_path
+        )
+        
+        return vector_store_path
+        
+        # print("임시 저장 파일 삭제중")
+        
+        # if os.path.exists(filepath):
+        #     os.remove(filepath)
+        #     print(f"  - 원본 PDF 삭제: {filepath}")
+
+        # md_path_to_remove = getattr(pp, 'des_md_output_file', None)
+        # if md_path_to_remove and os.path.exists(md_path_to_remove):
+        #     os.remove(md_path_to_remove)
+        #     print(f"  - 마크다운 파일 삭제: {md_path_to_remove}")
+
+        # img_dir_to_remove = getattr(pp, 'IMG_DIR_NAME', None)
+        # if img_dir_to_remove and os.path.exists(img_dir_to_remove):
+        #     shutil.rmtree(img_dir_to_remove)
+        #     print(f"  - 이미지 폴더 삭제: {img_dir_to_remove}")
+
+        # json_dir_to_remove = os.path.join(session_path, "upstage_output")
+        # if os.path.exists(json_dir_to_remove):
+        #     shutil.rmtree(json_dir_to_remove)
+        #     print(f"  - JSON 폴더 삭제: {json_dir_to_remove}")
+
         
         
-    def get_answer_from_document(self, question, document_id):
-        retriever = self.vectorstore.as_retriever(
+    def get_answer_from_document(self, question, document_id, vector_store_path):
+        """
+            유저로부터 질문을 받아서 질문에 대한 답변과 가장 관련이 높은 context 하나를 return 하는 함수
+        """
+        if not os.path.exists(vector_store_path):
+            return {"answer": "오류: 해당 세션의 벡터 데이터를 찾을 수 없습니다.", "context": ""}
+
+        # 1. 요청에 맞는 벡터 스토어를 동적으로 로드
+        vectorstore = Chroma(
+            persist_directory=vector_store_path,
+            embedding_function=self.embedding_model
+        )
+        
+        
+        retriever = vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={"k": 5, "filter": {"document_id": str(document_id)}}
         )
@@ -205,5 +217,9 @@ class RAGProcessor:
             | StrOutputParser()
         )
         
+        all_context_docs = retriever.invoke(question)
         answer = chain.invoke(question)
-        return answer
+        
+        single_context_docs = all_context_docs[0] if all_context_docs else None
+        
+        return {"answer": answer, "context": single_context_docs}

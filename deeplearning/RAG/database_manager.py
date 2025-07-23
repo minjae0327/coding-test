@@ -131,36 +131,21 @@ class DatabaseManager:
 
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 -- 세션 생성 시점
+                
+                vector_store_path VARCHAR(512) NULL,
+                -- 벡터스토어가 저장된 지점
 
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 -- 마지막 대화가 오고 간 시점 (자동 업데이트)
+                
 
                 -- 외래 키 설정
                 FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE,
                 -- ON DELETE SET NULL: 참조하던 문서가 삭제되어도 대화 세션 기록은 남기고, document_id만 NULL로 변경
                 FOREIGN KEY (document_id) REFERENCES Documents(document_id) ON DELETE SET NULL
             );
-           """,
-            # 4. Document_Chunks 테이블 (수정됨)
-            """
-            CREATE TABLE IF NOT EXISTS Document_Chunks (
-                chunk_id INT AUTO_INCREMENT PRIMARY KEY,
-                -- 각 문서 조각의 고유 번호
-
-                document_id INT NOT NULL,
-                -- 이 조각이 어느 원본 문서에 속하는지 식별 (수정됨)
-
-                chunk_text TEXT NOT NULL,
-                -- 잘게 나뉜 텍스트 조각의 원본 내용
-
-                vector_id VARCHAR(255) NOT NULL UNIQUE,
-                -- 벡터 DB에 저장된 벡터를 가리키는 고유 ID (UNIQUE 제약조건으로 자동 인덱싱됨)
-
-                -- 외래 키 설정: 참조하던 문서가 삭제되면, 관련된 모든 조각도 함께 삭제 (수정됨)
-                FOREIGN KEY (document_id) REFERENCES Documents(document_id) ON DELETE CASCADE
-            );
             """,
-            # 5. QnA_Logs 테이블
+            # 4. QnA_Logs 테이블
             """
             CREATE TABLE IF NOT EXISTS QnA_Logs (
                 qna_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -186,15 +171,20 @@ class DatabaseManager:
             );
             """
         ]
+                
+        try:
+            for query in queries:
+                self.execute_query(query)
+            print("모든 테이블이 성공적으로 설정되었습니다.")
+        except Error as e:
+            print(f"테이블 설정 중 오류 발생: {e}")
+
+       
         
-        for query in queries:
-            self.execute_query(query)
-        print("모든 테이블이 성공적으로 설정되었습니다.")
         
-        
-        #-----------------------------------------------------------
-        # db 조작 기능
-        #-----------------------------------------------------------
+    #-----------------------------------------------------------
+    # db 조작 기능
+    #-----------------------------------------------------------
         
     def check_table_data(self, table_name):
         """데이터베이스에 특정 테이블에 저장된 데이터를 조회하여 확인합니다."""
