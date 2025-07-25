@@ -13,3 +13,7 @@
 /chroma_db_store
 /uploads
 /chroma_db_store
+/deeplearning/logs
+/deeplearning/facial-keypoints-results
+deeplearning/facial-keypoints-detection.zip
+deeplearning/face_model/model.safetensors
