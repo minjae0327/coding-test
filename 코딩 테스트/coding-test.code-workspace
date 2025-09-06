@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../../Video-Spliter"
+		},
+		{
+			"path": "../../RAG"
 		}
 	],
 	"settings": {
@@ -57,7 +60,13 @@
 			"vector": "cpp",
 			"complex": "cpp",
 			"sstream": "cpp",
-			"algorithm": "cpp"
+			"algorithm": "cpp",
+			"charconv": "cpp",
+			"memory": "cpp",
+			"forward_list": "cpp",
+			"fstream": "cpp",
+			"iomanip": "cpp",
+			"unordered_set": "cpp"
 		}
 	}
 }
