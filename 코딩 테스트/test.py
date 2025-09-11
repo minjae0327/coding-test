@@ -1,32 +1,62 @@
+import os
 import torch
-import torchvision
+import PIL.Image as Image
 import torchvision.transforms as transforms
+from torch.utils.data import Dataset, DataLoader, random_split
+
+class CustomImageDataset(Dataset):
+    def __init__(self, root, transforms=None):
+        self.root = root
+        self.transforms = transforms
+        self.images = []
+        self.labels = []
+        
+        labels = os.listdir(self.root)
+        
+        class_to_idx = {label: i for i, label in enumerate(labels)}
+        
+        for label in labels:
+            images_path = os.path.join(self.root, label)
+            for image_path in (os.listdir(iamges_path))
+                if image_path.lower().endswith(".jpg", ".png", ".jpeg"):
+                    self.images.append(os.path.join(images_path, image_path))
+                    self.labels.append(class_to_idx[label])
+                
+            
+    def __len___(self):
+        return len(self.images) 
+    
+    def __getitem__(self, index):
+        image = self.images[index]
+        image = Image.open(image).convert("RGB")
+        label = self.labels[index]
+        
+        if self.transforms:
+            image = self.transforms(image)
+            
+        return image, labels
+    
+data_path = "data/output_frames/"
+
+data_transforms = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
+])
+
+dataset = CustomImageDataset(data_path, data_transforms)
+
+full_size = len(dataset)
+train_size = int(full_size * 0.8)
+test_size = full_size - train_size
+
+train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
+train_loader = DataLoader(train_dataset, 64, True, num_workers=0)
+test_loader = DataLoader(test_dataset, 64, False, num_workers=0)
+
 import torch.nn as nn
-import torch.optim as optim
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-
-train_transform = transforms.Compose([
-    transforms.RandomCrop(32, 4),
-    transforms.RandomVerticalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
-])
-
-test_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
-])
-
-train_dataset = torchvision.datasets.CIFAR10("./data", True, train_transform, download=False)
-test_dataset = torchvision.datasets.CIFAR10("./data", False, test_transform, download=False)
-
-train_loader = torch.utils.data.DataLoader(train_dataset, 64, True, num_workers=2)
-test_loader = torch.utils.data.DataLoader(test_dataset, 64, True, num_workers=2)
-
-classes = train_dataset.classes
-
 
 class SimpleCNN(nn.Module):
     def __init__(self):
@@ -37,10 +67,10 @@ class SimpleCNN(nn.Module):
         
         self.relu = nn.ReLU()
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-
+        
         self.flatten = nn.Flatten()
         
-        self.fc1 = nn.Linear(64*8*8, 512)
+        self.fc1 = nn.Linear(64*56*56, 512)
         self.fc2 = nn.Linear(512, 10)
         
     def forward(self, x):
@@ -54,86 +84,63 @@ class SimpleCNN(nn.Module):
         x = self.flatten(x)
         
         x = self.fc1(x)
+        x = self.relu(x)
         x = self.fc2(x)
         
         return x
     
 model = SimpleCNN()
-x = torch.randn(64, 3, 32, 32)
+x = torch.randn(64, 3, 224, 224)
 model(x).size()
 
-
-# from torchvision.models import resnet18, ResNet18_Weights
-
-# model = resnet18(ResNet18_Weights.DEFAULT)
-
-# for param in model.parameters():
-#     param.requires_grad() = False
-    
-# num_features = model.fc.in_features
-# model.fc = nn.Linear(num_features, 10)
-
-
-
+import torch.optim as optim
 
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.0001)
-
+optimizer = optim(model.parameters, lr = 0.00001)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
 def train(model, train_loader, criterion, optimizer, epochs):
     model.train()
-    
+
     for epoch in range(epochs):
         running_loss = 0.0
-        for data in train_loader:
-            X, y = data
-            X, y = X.to(device), y.to(device)
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
             
             optimizer.zero_grad()
-            
-            output = model(X)
-            
-            loss = criterion(output, y)
-            
+            output = model(images)
+            loss = criterion(output, labels)
             loss.backward()
-            
             optimizer.step()
             
-            running_loss += loss.item()
+            running_loss += loss
             
-        print(f"epoch:{epoch+1}, loss : {running_loss / len(train_loader)}")
-            
-train(model, train_loader, criterion, optimizer, 5)
-            
-            
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {running_loss/len(train_loader)}")
 
-def evaluate(model, test_loader):
-    model.eval() # 모델을 평가 모드로 설정
-    all_preds = []
+train(model, train_loader, criterion, optimizer, 10)
+
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+
+def eval(model, test_loader):
+    model.eval()
+    all_pred = []
     all_labels = []
-
-    # 평가 시에는 기울기 계산이 필요 없으므로 no_grad() 사용
+    
     with torch.no_grad():
-        for data in test_loader:
-            X, y = data
-            X, y = X.to(device), y.to(device)
+        for image, label in test_loader:
+            image, label = image.to(device), label.to(device)
             
-            outputs = model(X)
-            _, predicted = torch.max(outputs.data, 1)
+            output = model(image)
+            _, predicted = torch.max(output.data, dim=1)
             
-            all_preds.extend(predicted.cpu().numpy())
-            all_labels.extend(y.cpu().numpy())
-    
-    # 1. 평가 지표 계산
-    accuracy = accuracy_score(all_labels, all_preds)
-    precision, recall, f1, _ = precision_recall_fscore_support(all_labels, all_preds, average='macro')
-    
+            all_pred.append(predicted.cpu().numpy())
+            all_labels.append(label.cpu().numpy())
+            
+    accuracy = accuracy_score(all_labels, all_pred)
+    precision, recall, r1, _ = precision_recall_fscore_support(all_labels, all_pred, average="macro")
     
     print(f'Accuracy: {accuracy:.4f}')
     print(f'Precision: {precision:.4f}')
     print(f'Recall: {recall:.4f}')
     print(f'F1 Score: {f1:.4f}')
-    
-evaluate(model, test_loader)
